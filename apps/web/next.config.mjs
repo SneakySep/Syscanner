@@ -4,7 +4,7 @@ const nextConfig = {
 
   // Workspace packages are consumed as compiled output from `dist`, but listing
   // them here lets Next transpile them too and keeps source maps readable.
-  transpilePackages: ['@syscanner/ui', '@syscanner/contracts'],
+  transpilePackages: ['@syscanner/ui'],
 
   // Security headers are set here as a floor; the edge (CDN/WAF) owns the full policy.
   async headers() {

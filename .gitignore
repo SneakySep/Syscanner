@@ -10,6 +10,11 @@ out/
 .next/
 *.tsbuildinfo
 
+# Next.js regenerates this on every build/dev and it references .next/types,
+# which is gitignored — tracking it leaves a dangling reference on a fresh clone
+# and makes `pnpm typecheck` fail with TS6053 before the first build.
+next-env.d.ts
+
 # ── turbo ────────────────────────────────────────────────────────────────────
 .turbo/
 

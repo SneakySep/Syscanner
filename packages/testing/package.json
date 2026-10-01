@@ -18,7 +18,6 @@
     "clean": "rimraf dist"
   },
   "dependencies": {
-    "@syscanner/core": "workspace:*",
     "@syscanner/scanners": "workspace:*"
   },
   "devDependencies": {

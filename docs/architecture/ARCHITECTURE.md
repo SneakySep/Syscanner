@@ -306,8 +306,7 @@ Syscanner/
 │  │  │  ├─ tenant.ts                 # resolves the organisation, blocks cross-tenant
 │  │  │  ├─ plugins/                  # prisma, queues (BullMQ producer)
 │  │  │  └─ routes/                   # health, repositories, scans, findings
-│  │  ├─ Dockerfile
-│  │  └─ package.json
+│  │  └─ package.json                 # Dockerfile: not authored yet
 │  │
 │  ├─ worker/                         # BullMQ consumers (orchestrator + scanners)
 │  │  ├─ src/
@@ -323,8 +322,7 @@ Syscanner/
 │  │  │  ├─ sandbox/                  # provider abstraction (docker | gvisor | kata)
 │  │  │  ├─ git/                      # fetchByCommit, validateCloneUrl
 │  │  │  └─ dev/scanOneRepo.ts        # UNSAFE dev-only local scanner
-│  │  ├─ Dockerfile
-│  │  └─ package.json
+│  │  └─ package.json                 # Dockerfile: not authored yet
 │  │
 │  └─ sandbox-runner/                 # ENTRYPOINT executed INSIDE the sandbox
 │     ├─ src/main.ts                  # reads job spec, execs tool, emits SARIF
@@ -732,10 +730,11 @@ summary.
    `osv-scanner --offline`. No `postinstall`, no `setup.py`, no `Makefile` ever runs.
    If a build is unavoidable: `npm_config_ignore_scripts=true`,
    `--ignore-scripts`, no network, no credential helper.
-4. **Cap everything:** `SANDBOX_MAX_REPO_MB`, a file-count ceiling, and a
-   `SANDBOX_MAX_FINDINGS` cap on ingest. Archive extraction additionally enforces
-   traversal rejection, no out-of-root symlinks, entry-count limits and a maximum
-   decompression ratio (zip-bomb guard).
+4. **Cap everything:** `SANDBOX_MAX_REPO_MB` and a `SANDBOX_MAX_FINDINGS` cap on
+   ingest. Archive extraction additionally enforces traversal rejection, no
+   out-of-root symlinks, entry-count limits and a maximum decompression ratio
+   (zip-bomb guard). *Planned, not yet implemented:* a repository **file-count**
+   ceiling (`SANDBOX_MAX_FILES`) — grep the codebase and you will not find it read.
 5. **Block remote scanner configs.** A repository may ship `.semgrep.yml`,
    `.gitleaks.toml` or an osv ignore file, and Semgrep will happily fetch a remote
    `--config` URL. Adapters therefore hard-code a **local, image-bundled ruleset

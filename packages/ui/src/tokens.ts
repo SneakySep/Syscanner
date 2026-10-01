@@ -25,14 +25,3 @@ export function severityLabel(severity: string): string {
   const entry = SEVERITY_PRESENTATION[severity as PresentationSeverity];
   return entry?.label ?? severity;
 }
-
-/** Human labels for scanner kinds, used in tables and filters. */
-export const KIND_LABELS: Record<string, string> = {
-  SAST: 'SAST',
-  SECRETS: 'Secrets',
-  DEPENDENCY: 'Dependencies',
-  LICENSE: 'Licenses',
-  IAC: 'IaC',
-  CONTAINER: 'Containers',
-  SBOM: 'SBOM',
-};

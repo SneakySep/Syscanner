@@ -41,15 +41,9 @@ importers:
       '@syscanner/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@syscanner/crypto':
-        specifier: workspace:*
-        version: link:../../packages/crypto
       '@syscanner/db':
         specifier: workspace:*
         version: link:../../packages/db
-      '@syscanner/logger':
-        specifier: workspace:*
-        version: link:../../packages/logger
       '@syscanner/queue':
         specifier: workspace:*
         version: link:../../packages/queue
@@ -77,10 +71,6 @@ importers:
         version: 2.1.9(@types/node@22.20.4)
 
   apps/sandbox-runner:
-    dependencies:
-      '@syscanner/contracts':
-        specifier: workspace:*
-        version: link:../../packages/contracts
     devDependencies:
       rimraf:
         specifier: ^6.0.1
@@ -97,9 +87,6 @@ importers:
       '@monaco-editor/react':
         specifier: ^4.7.0
         version: 4.7.0(monaco-editor@0.52.2)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
-      '@syscanner/contracts':
-        specifier: workspace:*
-        version: link:../../packages/contracts
       '@syscanner/ui':
         specifier: workspace:*
         version: link:../../packages/ui
@@ -174,9 +161,6 @@ importers:
         specifier: ^3.24.1
         version: 3.25.76
     devDependencies:
-      '@syscanner/testing':
-        specifier: workspace:*
-        version: link:../../packages/testing
       rimraf:
         specifier: ^6.0.1
         version: 6.1.3
@@ -319,9 +303,6 @@ importers:
 
   packages/testing:
     dependencies:
-      '@syscanner/core':
-        specifier: workspace:*
-        version: link:../core
       '@syscanner/scanners':
         specifier: workspace:*
         version: link:../scanners

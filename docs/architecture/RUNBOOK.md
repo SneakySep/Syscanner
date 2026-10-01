@@ -92,7 +92,8 @@ in the orchestrator's local spool. Restore Redis, resume consumers, verify no du
 | Regenerate Prisma client | `pnpm db:generate` |
 | Seed a local tenant | `pnpm db:seed` |
 | Bring up local infra | `pnpm infra:up` |
-| Tail worker logs | `docker compose -f infra/docker/docker-compose.yml logs -f worker` |
+| Tail the local stack | `docker compose -f infra/docker/docker-compose.yml logs -f` |
+| Tail a specific service | `docker compose -f infra/docker/docker-compose.yml logs -f postgres` |
 | Rotate KMS data key | Bump `KMS_KEY_ID`, run the re-encryption job, revoke the old key |
 
 ## 5. Escalation
