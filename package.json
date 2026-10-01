@@ -1,0 +1,39 @@
+{
+  "name": "syscanner",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Syscanner - multi-tenant SAST, secrets detection and dependency vulnerability scanning platform",
+  "license": "UNLICENSED",
+  "packageManager": "pnpm@9.15.4",
+  "engines": {
+    "node": ">=20.11.0"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "db:generate": "turbo run db:generate",
+    "db:validate": "pnpm --filter @syscanner/db run db:validate",
+    "db:migrate": "pnpm --filter @syscanner/db run db:migrate",
+    "db:seed": "pnpm --filter @syscanner/db run db:seed",
+    "format": "prettier --write \"**/*.{ts,tsx,js,json,md,yml,yaml}\"",
+    "infra:up": "docker compose -f infra/docker/docker-compose.yml up -d",
+    "infra:down": "docker compose -f infra/docker/docker-compose.yml down"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "prettier": "^3.4.2",
+    "turbo": "^2.3.3",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@prisma/client",
+      "@prisma/engines",
+      "prisma",
+      "esbuild"
+    ]
+  }
+}

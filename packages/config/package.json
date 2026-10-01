@@ -1,0 +1,16 @@
+{
+  "name": "@syscanner/config",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Shared TypeScript and Prettier configuration presets for the Syscanner monorepo",
+  "files": ["tsconfig", "prettier.config.cjs"],
+  "exports": {
+    "./tsconfig/node-library.json": "./tsconfig/node-library.json",
+    "./tsconfig/react-library.json": "./tsconfig/react-library.json",
+    "./tsconfig/nextjs.json": "./tsconfig/nextjs.json",
+    "./prettier": "./prettier.config.cjs"
+  },
+  "scripts": {
+    "test": "vitest run --passWithNoTests"
+  }
+}

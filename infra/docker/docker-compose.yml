@@ -1,0 +1,88 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Local development infrastructure.
+#
+#   pnpm infra:up      start Postgres + Redis + MinIO
+#   pnpm infra:down    stop and remove volumes
+#
+# These services are bound to 127.0.0.1 only. Nothing here is production-shaped:
+# in production Postgres is RDS, Redis is ElastiCache and artifacts go to S3 with
+# KMS-managed encryption and a lifecycle rule.
+# ─────────────────────────────────────────────────────────────────────────────
+name: syscanner
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: syscanner-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: syscanner
+      POSTGRES_PASSWORD: syscanner
+      POSTGRES_DB: syscanner
+    ports:
+      - '127.0.0.1:5432:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U syscanner -d syscanner']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [syscanner]
+
+  redis:
+    image: redis:7-alpine
+    container_name: syscanner-redis
+    restart: unless-stopped
+    # A local password mirrors production, where Redis requires AUTH over TLS.
+    command: ['redis-server', '--appendonly', 'yes', '--requirepass', 'syscanner']
+    ports:
+      - '127.0.0.1:6379:6379'
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', '-a', 'syscanner', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [syscanner]
+
+  # S3-compatible object storage for SARIF/SBOM artifacts.
+  minio:
+    image: minio/minio:latest
+    container_name: syscanner-minio
+    restart: unless-stopped
+    command: ['server', '/data', '--console-address', ':9001']
+    environment:
+      MINIO_ROOT_USER: syscanner
+      MINIO_ROOT_PASSWORD: syscanner-local-dev
+    ports:
+      - '127.0.0.1:9000:9000'
+      - '127.0.0.1:9001:9001'
+    volumes:
+      - minio-data:/data
+    networks: [syscanner]
+
+  # One-shot: creates the artifacts bucket and expires objects after 72h, matching
+  # ARTIFACT_RETENTION_HOURS. Customer source material must not live forever.
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://minio:9000 syscanner syscanner-local-dev; do sleep 1; done;
+      mc mb --ignore-existing local/syscanner-artifacts;
+      mc ilm add --expiry-days 3 local/syscanner-artifacts;
+      echo 'artifacts bucket ready';
+      "
+    networks: [syscanner]
+
+volumes:
+  postgres-data:
+  redis-data:
+  minio-data:
+
+networks:
+  syscanner:
+    driver: bridge

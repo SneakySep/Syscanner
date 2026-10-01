@@ -1,0 +1,34 @@
+{
+  "name": "@syscanner/api",
+  "version": "0.1.0",
+  "private": true,
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "clean": "rimraf dist"
+  },
+  "dependencies": {
+    "@fastify/cors": "^10.0.1",
+    "@fastify/helmet": "^13.0.1",
+    "@fastify/rate-limit": "^10.2.1",
+    "@syscanner/contracts": "workspace:*",
+    "@syscanner/core": "workspace:*",
+    "@syscanner/crypto": "workspace:*",
+    "@syscanner/db": "workspace:*",
+    "@syscanner/logger": "workspace:*",
+    "@syscanner/queue": "workspace:*",
+    "fastify": "^5.2.0",
+    "fastify-plugin": "^5.0.1",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "rimraf": "^6.0.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

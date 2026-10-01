@@ -1,0 +1,43 @@
+# ── dependencies ─────────────────────────────────────────────────────────────
+node_modules/
+.pnpm-store/
+.pnp.*
+
+# ── build output ─────────────────────────────────────────────────────────────
+dist/
+build/
+out/
+.next/
+*.tsbuildinfo
+
+# ── turbo ────────────────────────────────────────────────────────────────────
+.turbo/
+
+# ── environment ──────────────────────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# ── prisma / local data ──────────────────────────────────────────────────────
+packages/db/prisma/*.db
+packages/db/prisma/*.db-journal
+
+# ── scan artifacts (must never be committed: may contain customer source) ────
+artifacts/
+*.sarif
+*.sbom.json
+
+# ── logs / coverage ──────────────────────────────────────────────────────────
+*.log
+npm-debug.log*
+pnpm-debug.log*
+coverage/
+
+# ── editors / os ─────────────────────────────────────────────────────────────
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+.DS_Store
+Thumbs.db

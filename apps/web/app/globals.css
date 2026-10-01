@@ -1,0 +1,19 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  @apply bg-surface text-slate-200 antialiased;
+}
+
+/* Findings render untrusted scanner text. The CSP and React's own escaping are the
+   real controls; this is defence in depth for anything rendered as plain text. */
+.untrusted-text {
+  @apply break-words font-mono text-xs;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

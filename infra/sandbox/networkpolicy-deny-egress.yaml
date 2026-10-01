@@ -1,0 +1,89 @@
+# Deny all egress from the sandbox namespace by default.
+#
+# Anything a scanner genuinely needs (an OSV advisory mirror, for example) must be
+# reached through the authenticated egress proxy, which has its own allowlist and
+# its own audit log. Nothing else gets out — the point is that a repository cannot
+# decide where its own source code travels.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: sandbox-default-deny-egress
+  namespace: syscanner-sandbox
+spec:
+  podSelector:
+    matchLabels:
+      syscanner.io/plane: sandbox
+  policyTypes:
+    - Egress
+    - Ingress
+  # No ingress rules at all: a sandbox never accepts connections.
+  ingress: []
+  egress:
+    # DNS is required for the allowlist proxy to resolve names, and is pinned to the
+    # cluster resolver only so it cannot be used for tunnelling.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+    # The egress proxy is the single, audited hop to the public internet.
+    - to:
+        - podSelector:
+            matchLabels:
+              syscanner.io/component: egress-proxy
+      ports:
+        - protocol: TCP
+          port: 8443
+
+    # Metadata service is explicitly unreachable even if a default route appears.
+    # (Expressed as a comment because NetworkPolicy cannot express "deny this CIDR
+    # while allowing others by name" — the egress proxy enforces it. See
+    # docs/architecture/THREAT-MODEL.md T3.)
+    #
+    # BLOCKED: 169.254.169.254/32, 169.254.0.0/16, 10.0.0.0/8, 172.16.0.0/12,
+    #          192.168.0.0/16, 127.0.0.0/8, ::1/128, fc00::/7
+---
+# The orchestrator's own pods may reach Postgres, Redis and the object store —
+# the sandbox may not. Keeping the two in separate namespaces is what makes this
+# enforceable rather than aspirational.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: control-plane-restrict-egress
+  namespace: syscanner
+spec:
+  podSelector:
+    matchLabels:
+      syscanner.io/plane: control
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              syscanner.io/component: postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+    - to:
+        - podSelector:
+            matchLabels:
+              syscanner.io/component: redis
+      ports:
+        - protocol: TCP
+          port: 6379
+    - to:
+        - podSelector:
+            matchLabels:
+              syscanner.io/component: object-store
+      ports:
+        - protocol: TCP
+          port: 443

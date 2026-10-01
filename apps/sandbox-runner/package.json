@@ -1,0 +1,22 @@
+{
+  "name": "@syscanner/sandbox-runner",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Entrypoint executed INSIDE the sandbox. Never imported by control-plane code.",
+  "main": "./dist/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/main.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "clean": "rimraf dist"
+  },
+  "dependencies": {
+    "@syscanner/contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "rimraf": "^6.0.1",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

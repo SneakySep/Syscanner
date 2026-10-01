@@ -1,0 +1,485 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Syscanner — Prisma schema (PostgreSQL 16)
+//
+// Design notes
+//  • Postgres `Bytes` maps to `bytea`. Secrets are stored ONLY as KMS-encrypted
+//    blobs, or as immutable references ("vault://...") — never as plaintext.
+//  • All bulk artifacts (raw SARIF / SBOM / scanner logs) live in object storage;
+//    this database stores object keys only.
+//  • Every tenant-scoped table carries organizationId so row-level filtering can
+//    never be forgotten by a single query.
+//  • `Finding.fingerprint` is the load-bearing field: it makes findings comparable
+//    across scans (new / still open / fixed) and lets suppressions survive
+//    refactors.
+// ─────────────────────────────────────────────────────────────────────────────
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ── Enums ────────────────────────────────────────────────────────────────────
+
+enum Role {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+enum ScmProvider {
+  GITHUB
+  GITLAB
+  BITBUCKET
+  AZURE_DEVOPS
+  GENERIC_GIT
+}
+
+enum ScanTrigger {
+  MANUAL
+  WEBHOOK
+  SCHEDULE
+  API
+  CLI
+}
+
+enum ScanStatus {
+  QUEUED
+  CLONING
+  SCANNING
+  PARSING
+  COMPLETED
+  PARTIAL
+  FAILED
+  CANCELLED
+}
+
+enum ScannerKind {
+  SAST
+  SECRETS
+  DEPENDENCY
+  LICENSE
+  IAC
+  CONTAINER
+  SBOM
+}
+
+enum TaskStatus {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  FAILED
+  TIMED_OUT
+  SKIPPED
+}
+
+enum Severity {
+  CRITICAL
+  HIGH
+  MEDIUM
+  LOW
+  INFO
+  UNKNOWN
+}
+
+enum FindingStatus {
+  OPEN
+  RESOLVED
+  IGNORED
+  FALSE_POSITIVE
+  WONT_FIX
+}
+
+enum Confidence {
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum NotificationType {
+  SLACK
+  TEAMS
+  EMAIL
+  WEBHOOK
+  GITHUB_CHECK
+}
+
+// ── Tenancy & identity ───────────────────────────────────────────────────────
+
+model Organization {
+  id       String @id @default(cuid())
+  name     String
+  slug     String @unique
+  plan     String @default("free")
+
+  // Quotas are a security control: they bound denial-of-wallet from a hostile repo.
+  maxConcurrentScans Int @default(2)
+  monthlyScanQuota   Int @default(50)
+  retentionDays      Int @default(90)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  memberships          Membership[]
+  apiTokens            ApiToken[]
+  repositories         Repository[]
+  scans                Scan[]
+  findings             Finding[]
+  suppressions         FindingSuppression[]
+  auditLogs            AuditLog[]
+  notificationChannels NotificationChannel[]
+
+  @@index([createdAt])
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  emailVerified DateTime?
+  name          String?
+  avatarUrl     String?
+
+  // null for SSO-only accounts. Argon2id when set.
+  passwordHash String?
+
+  mfaEnabled   Boolean @default(false)
+  // KMS envelope-encrypted TOTP seed.
+  mfaSecretEnc Bytes?
+
+  isActive    Boolean   @default(true)
+  lastLoginAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  memberships  Membership[]
+  apiTokens    ApiToken[]
+  scans        Scan[]              @relation("ScanTriggeredBy")
+  suppressions FindingSuppression[]
+  auditLogs    AuditLog[]
+
+  @@index([createdAt])
+}
+
+model Membership {
+  id             String   @id @default(cuid())
+  userId         String
+  organizationId String
+  role           Role     @default(MEMBER)
+  createdAt      DateTime @default(now())
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, organizationId])
+  @@index([organizationId, role])
+}
+
+model ApiToken {
+  id             String @id @default(cuid())
+  organizationId String
+  userId         String?
+  name           String
+
+  // The plaintext token is shown exactly once at creation and never stored.
+  prefix    String @unique
+  tokenHash String @unique
+  scopes    String[] @default([])
+
+  lastUsedAt DateTime?
+  expiresAt  DateTime?
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, revokedAt])
+}
+
+// ── Repositories ─────────────────────────────────────────────────────────────
+
+model Repository {
+  id             String      @id @default(cuid())
+  organizationId String
+  provider       ScmProvider
+
+  // The provider's own numeric/opaque identifier; stable across renames.
+  providerRepoId String
+  fullName       String // "acme/backend"
+  cloneUrl       String
+
+  defaultBranch String  @default("main")
+  isPrivate     Boolean @default(true)
+  isArchived    Boolean @default(false)
+  language      String?
+  sizeKb        Int?
+
+  // NEVER persist an SCM credential here. Store only a pointer into Vault/KMS.
+  credentialRef String?
+
+  // KMS envelope-encrypted webhook HMAC secret.
+  webhookSecretEnc Bytes?
+
+  // {"scanners":["SAST","SECRETS","DEPENDENCY"],"excludePaths":["vendor/**"],"failOn":"HIGH"}
+  scanConfig Json @default("{}")
+
+  lastScanAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  deletedAt  DateTime?
+
+  organization Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  scans        Scan[]
+  findings     Finding[]
+  suppressions FindingSuppression[]
+
+  @@unique([organizationId, provider, providerRepoId])
+  @@unique([organizationId, fullName])
+  @@index([organizationId, lastScanAt(sort: Desc)])
+}
+
+// ── Scans ────────────────────────────────────────────────────────────────────
+
+model Scan {
+  id             String      @id @default(cuid())
+  organizationId String
+  repositoryId   String
+  triggeredById  String?
+  trigger        ScanTrigger @default(MANUAL)
+  status         ScanStatus  @default(QUEUED)
+
+  branch        String?
+  // Immutable target. Everything about a scan is pinned to this SHA.
+  commitSha     String  @db.VarChar(64)
+  // Enables incremental / PR-diff scans.
+  baseCommitSha String? @db.VarChar(64)
+  prNumber      Int?
+
+  // Idempotency key: sha256(repositoryId | commitSha | policyVersion | toolVersions)
+  inputFingerprint String @db.VarChar(64)
+  policyVersion    Int    @default(1)
+
+  // Reproducibility: pin tool versions AND the exact image digest, never a tag.
+  toolVersions Json    @default("{}")
+  workerImage  String?
+
+  // Denormalized aggregates so dashboards never COUNT(*) a huge table.
+  totalFindings Int @default(0)
+  criticalCount Int @default(0)
+  highCount     Int @default(0)
+  mediumCount   Int @default(0)
+  lowCount      Int @default(0)
+  infoCount     Int @default(0)
+  filesScanned  Int @default(0)
+  linesScanned  Int @default(0)
+
+  // Artifacts live in object storage; the database stores keys only.
+  sarifArtifactKey String?
+  sbomArtifactKey  String?
+  logArtifactKey   String?
+
+  errorCode    String?
+  errorMessage String?  @db.Text
+  durationMs   Int?
+  queuedAt     DateTime @default(now())
+  startedAt    DateTime?
+  finishedAt   DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  repository   Repository   @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  triggeredBy  User?        @relation("ScanTriggeredBy", fields: [triggeredById], references: [id], onDelete: SetNull)
+  tasks        ScanTask[]
+  findings     Finding[]
+
+  // A repeated request for the same commit under the same policy is a no-op.
+  @@unique([repositoryId, commitSha, inputFingerprint])
+  @@index([organizationId, createdAt(sort: Desc)])
+  @@index([repositoryId, createdAt(sort: Desc)])
+  @@index([status])
+}
+
+// One row per (scan, scanner). Lets a single tool fail without losing the whole scan.
+model ScanTask {
+  id          String      @id @default(cuid())
+  scanId      String
+  kind        ScannerKind
+  tool        String // "semgrep" | "gitleaks" | "osv-scanner" | "trivy"
+  toolVersion String?
+
+  status      TaskStatus @default(PENDING)
+  attempt     Int        @default(0)
+  exitCode    Int?
+  timedOut    Boolean    @default(false)
+  errorMessage String?   @db.Text
+  durationMs  Int?
+
+  startedAt         DateTime?
+  finishedAt        DateTime?
+  resultArtifactKey String?
+  createdAt         DateTime  @default(now())
+
+  scan     Scan      @relation(fields: [scanId], references: [id], onDelete: Cascade)
+  findings Finding[]
+
+  @@unique([scanId, kind, tool])
+  @@index([scanId, status])
+  @@index([status, createdAt])
+}
+
+// ── Vulnerabilities / Findings ───────────────────────────────────────────────
+
+/// One detected issue. This is the table the whole product reads from, so it is
+/// deliberately denormalized: SAST locations, secret metadata and dependency/CVE
+/// data all live on the same row, discriminated by `kind`.
+///
+/// `fingerprint` is the stable identity of an issue across scans. It is built as
+///   sha256(kind | ruleId | filePath | normalizedLineContext | secretHash)
+/// and, for dependency findings, replaces the location component with
+///   ecosystem | packageName.
+model Finding {
+  id          String @id @default(cuid())
+  fingerprint String @db.VarChar(64)
+
+  scanId         String
+  taskId         String?
+  repositoryId   String
+  organizationId String
+
+  // ── Provenance ──
+  kind       ScannerKind
+  scanner    String // producing tool, e.g. "semgrep"
+  ruleId     String // e.g. "javascript.express.security.audit.xss.direct-response-write"
+  title      String
+  description String?  @db.Text
+  category   String? // e.g. "command-injection", "hardcoded-secret"
+  references String[] @default([])
+
+  // ── Severity & classification ──
+  severity   Severity  @default(UNKNOWN)
+  cvssScore  Decimal?  @db.Decimal(3, 1) // 0.0 – 10.0
+  cvssVector String?
+  confidence Confidence?
+  cweIds     String[]  @default([]) // ["CWE-79"]
+  cveIds     String[]  @default([]) // ["CVE-2024-3094"]
+  ghsaId     String? // "GHSA-xxxx-xxxx-xxxx"
+  owaspCategory String? // "A03:2021-Injection"
+
+  // ── Location (SAST + secrets) ──
+  filePath    String? @db.Text // repo-relative: "src/api/users.ts"
+  startLine   Int?
+  endLine     Int?
+  startColumn Int?
+  endColumn   Int?
+  // Hash of the matched snippet only. Raw snippets (which may contain live
+  // secrets) are never persisted here; see §5 of ARCHITECTURE.md.
+  snippetHash String? @db.VarChar(64)
+
+  // ── Dependency data (CVE findings) ──
+  packageName    String? // "lodash"
+  packageVersion String? // "4.17.20"
+  fixedVersion   String? // "4.17.21"
+  ecosystem      String? // "npm" | "PyPI" | "Maven" | "Go" | "crates.io"
+  dependencyPath String? @db.Text // transitive chain: "a > b > lodash"
+
+  // ── Lifecycle ──
+  status          FindingStatus @default(OPEN)
+  firstSeenAt     DateTime      @default(now())
+  lastSeenAt      DateTime      @default(now())
+  detectedAt      DateTime      @default(now())
+  resolvedAt      DateTime?
+  occurrenceCount Int           @default(1)
+
+  // Size-capped raw tool record, for forensics only.
+  raw Json?
+
+  scan         Scan         @relation(fields: [scanId], references: [id], onDelete: Cascade)
+  task         ScanTask?    @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  repository   Repository   @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  // NOTE: there is deliberately no relation to FindingSuppression. A suppression
+  // targets an *issue* (identified by `fingerprint`), not one scan's row, so the
+  // join is done on the fingerprint at query time. See FindingSuppression below.
+
+  // Makes bulk upserts idempotent under BullMQ retries.
+  @@unique([scanId, fingerprint])
+  @@index([organizationId, severity, status])
+  @@index([repositoryId, status, severity])
+  @@index([repositoryId, fingerprint])
+  @@index([filePath])
+  @@index([ruleId])
+  @@index([packageName, packageVersion])
+  @@index([cveIds], type: Gin)
+  @@index([cweIds], type: Gin)
+}
+
+/// Suppresses an *issue* (not a single occurrence) so it survives new scans.
+model FindingSuppression {
+  id             String    @id @default(cuid())
+  organizationId String
+  repositoryId   String
+  fingerprint    String    @db.VarChar(64)
+  reason         String    @db.Text
+  // Suppressions should expire; a null expiry should be rare and reviewed.
+  expiresAt      DateTime?
+  createdById    String?
+  createdAt      DateTime  @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  repository   Repository   @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  createdBy    User?        @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@unique([repositoryId, fingerprint])
+  @@index([repositoryId, expiresAt])
+  @@index([organizationId, createdAt(sort: Desc)])
+}
+
+// ── Governance & notifications ───────────────────────────────────────────────
+
+model AuditLog {
+  id             String @id @default(cuid())
+  organizationId String
+  actorId        String?
+
+  action     String // "scan.created", "token.revoked", "finding.suppressed"
+  targetType String
+  targetId   String?
+
+  ipAddress String?
+  userAgent String? @db.Text
+  metadata  Json    @default("{}")
+  createdAt DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  actor        User?        @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, createdAt(sort: Desc)])
+  @@index([action, createdAt(sort: Desc)])
+}
+
+model NotificationChannel {
+  id             String           @id @default(cuid())
+  organizationId String
+  type           NotificationType
+  name           String
+
+  // KMS envelope-encrypted config (Slack webhook URL, SMTP credentials, …).
+  configEnc Bytes
+
+  events      String[] @default([]) // ["scan.completed", "finding.critical"]
+  minSeverity Severity @default(HIGH)
+  enabled     Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, enabled])
+}

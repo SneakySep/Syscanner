@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "display": "Syscanner Node library",
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "types": ["node"],
+    "lib": ["ES2022"]
+  }
+}

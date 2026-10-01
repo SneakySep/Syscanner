@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "display": "Syscanner Next.js application",
+  "$comment": "Next.js owns bundling, so this preset type-checks without emitting. `module` and `moduleResolution` are overridden to the values Next.js expects.",
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "preserve",
+    "noEmit": true,
+    "declaration": false,
+    "declarationMap": false,
+    "allowJs": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["node"],
+    "plugins": [{ "name": "next" }]
+  }
+}

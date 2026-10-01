@@ -1,0 +1,89 @@
+name: Sandbox containment tests
+
+# The sandbox is the only place untrusted code runs, so its guarantees get their own
+# suite. Each fixture in @syscanner/testing tries to escape, exhaust resources or
+# reach the network, and the run FAILS if any of them succeeds.
+#
+# Runs on a privileged runner because it needs a real container runtime; that is
+# acceptable precisely because this job hosts nothing but deliberately hostile code.
+on:
+  pull_request:
+    paths:
+      - 'apps/worker/src/sandbox/**'
+      - 'apps/sandbox-runner/**'
+      - 'packages/testing/**'
+      - 'infra/sandbox/**'
+      - '.github/workflows/malicious-repo-tests.yml'
+  schedule:
+    # Nightly, so a host kernel or runtime update cannot silently weaken isolation.
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  containment:
+    name: Hostile repository corpus
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      # Verifies the fixture corpus itself (coverage, expectations, zero-egress rule).
+      - name: Fixture corpus assertions
+        run: pnpm --filter @syscanner/testing test
+
+      # Verifies the hardened argv builders: no ambient env, local-only rulesets,
+      # telemetry off, offline dependency scanning, secret redaction.
+      - name: Scanner hardening assertions
+        run: pnpm --filter @syscanner/scanners test
+
+      - name: Assert the seccomp profile denies escape-capable syscalls
+        run: |
+          set -euo pipefail
+          for syscall in ptrace mount umount unshare setns bpf keyctl init_module kexec_load reboot; do
+            if grep -q "\"$syscall\"" infra/sandbox/seccomp-profile.json; then
+              echo "::error::seccomp profile allows $syscall, which enables sandbox escape"
+              exit 1
+            fi
+          done
+          echo "seccomp profile denies every escape-capable syscall"
+
+      - name: Assert the default-deny egress policy has no blanket allow rule
+        run: |
+          set -euo pipefail
+          if grep -qE 'cidr:\s*0\.0\.0\.0/0' infra/sandbox/networkpolicy-deny-egress.yaml; then
+            echo "::error::egress policy contains a blanket allow rule"
+            exit 1
+          fi
+          if ! grep -q 'ingress: \[\]' infra/sandbox/networkpolicy-deny-egress.yaml; then
+            echo "::error::sandbox policy must deny all ingress"
+            exit 1
+          fi
+          echo "egress policy is default-deny"
+
+      - name: Assert every sandbox image reference is digest-pinned
+        run: |
+          set -euo pipefail
+          if grep -RnE 'SANDBOX_IMAGE[A-Z_]*=.*:(latest|main|stable)' .env.example; then
+            echo "::error::sandbox images must be pinned by digest, not tag"
+            exit 1
+          fi
+          echo "image references are digest-pinned"

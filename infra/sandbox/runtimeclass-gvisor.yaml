@@ -1,0 +1,49 @@
+# gVisor runtime class.
+#
+# Scanner workloads run untrusted, attacker-authored code. A shared kernel is the
+# single largest blast radius in that design, so the sandbox does not use one:
+# gVisor intercepts syscalls and implements the kernel surface in userspace, which
+# removes the container-escape class of bugs (THREAT-MODEL.md T1) from the
+# sandbox's threat model.
+#
+# Apply on a dedicated, tainted node pool that runs NOTHING but sandboxes.
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: gvisor
+# `runsc` is gVisor's runtime binary, installed on the sandbox node pool.
+handler: runsc
+overhead:
+  # gVisor adds memory and CPU overhead beyond the workload's own footprint; the
+  # scheduler must budget for it or workloads get OOM-killed for reasons their
+  # own limits do not explain.
+  podFixed:
+    memory: '256Mi'
+    cpu: '250m'
+scheduling:
+  nodeSelector:
+    syscanner.io/node-pool: sandbox
+    sandbox.gke.io/runtime: gvisor
+  tolerations:
+    # Sandboxes run only on the tainted pool, alongside other sandboxes.
+    - key: syscanner.io/sandbox
+      operator: Equal
+      value: 'true'
+      effect: NoSchedule
+---
+# A Kata Containers alternative, where a full microVM boundary is preferred (for
+# example when a regulator requires a hardware-virtualisation boundary).
+#
+# apiVersion: node.k8s.io/v1
+# kind: RuntimeClass
+# metadata:
+#   name: kata
+# handler: kata-qemu
+# scheduling:
+#   nodeSelector:
+#     syscanner.io/node-pool: sandbox
+#   tolerations:
+#     - key: syscanner.io/sandbox
+#       operator: Equal
+#       value: 'true'
+#       effect: NoSchedule
