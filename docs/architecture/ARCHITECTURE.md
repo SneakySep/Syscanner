@@ -278,30 +278,34 @@ Syscanner/
 ├─ apps/
 │  ├─ web/                            # Next.js 15 (App Router) — dashboard & BFF
 │  │  ├─ app/
-│  │  │  ├─ (auth)/login/page.tsx
-│  │  │  ├─ (dashboard)/
-│  │  │  │  ├─ layout.tsx             # tenant-aware shell
-│  │  │  │  ├─ page.tsx               # overview + severity rollup
-│  │  │  │  ├─ repositories/page.tsx
-│  │  │  │  ├─ scans/[scanId]/page.tsx
-│  │  │  │  └─ findings/[findingId]/page.tsx
+│  │  │  ├─ page.tsx                  # overview + severity legend
+│  │  │  ├─ repositories/page.tsx     # connected repositories
+│  │  │  ├─ scans/[scanId]/page.tsx   # scan summary + findings table
+│  │  │  ├─ scans/[scanId]/code/page.tsx  # Monaco code viewer (fixture-backed demo)
 │  │  │  ├─ api/scans/[scanId]/stream/route.ts   # SSE progress (BFF, no DB)
 │  │  │  ├─ layout.tsx
 │  │  │  └─ globals.css
-│  │  ├─ components/
-│  │  ├─ lib/                         # api client, sse client, auth helpers
+│  │  ├─ components/code-viewer/
+│  │  │  ├─ VulnerabilityCodeViewer.tsx  # client component: editor + sidebar
+│  │  │  ├─ VulnerabilitiesSidebar.tsx   # interactive findings panel
+│  │  │  ├─ CodeViewerMount.tsx          # dynamic(ssr:false) wrapper
+│  │  │  ├─ decorations.ts               # PURE: findings -> Monaco decorations
+│  │  │  ├─ monaco-setup.ts              # loader.config + web workers (self-hosted)
+│  │  │  └─ decorations.test.ts
+│  │  ├─ lib/                         # api client, demo fixtures
 │  │  ├─ next.config.mjs
 │  │  ├─ tailwind.config.ts
 │  │  ├─ tsconfig.json                # overrides base: jsx, noEmit, bundler
 │  │  └─ package.json
 │  │
-│  ├─ api/                            # Fastify API Gateway / domain services
+│  ├─ api/                            # Fastify API gateway (domain services)
 │  │  ├─ src/
 │  │  │  ├─ index.ts                  # bootstrap + graceful shutdown
 │  │  │  ├─ app.ts                    # Fastify instance factory (testable)
-│  │  │  ├─ plugins/                  # auth, authz, tenant, quota, rateLimit, prisma
-│  │  │  ├─ modules/                  # repositories, scans, findings, webhooks
-│  │  │  └─ openapi.ts                # OpenAPI document from zod contracts
+│  │  │  ├─ config.ts                 # validated env
+│  │  │  ├─ tenant.ts                 # resolves the organisation, blocks cross-tenant
+│  │  │  ├─ plugins/                  # prisma, queues (BullMQ producer)
+│  │  │  └─ routes/                   # health, repositories, scans, findings
 │  │  ├─ Dockerfile
 │  │  └─ package.json
 │  │
@@ -780,6 +784,12 @@ summary.
 - **The parser is hardened** (`packages/scanners/src/sarif.ts`): size-capped input,
   traversal that only reads known keys and never spreads attacker-supplied objects,
   control-character stripping, bounded string lengths, and a result cap.
+- **Bidi override controls are stripped at the parse boundary**
+  (`stripBidiControls`, used by `sanitizeString`). Removing C0 controls is not enough:
+  `U+202A–202E`, `U+2066–2069`, `U+200E/F` and `U+061C` are invisible and let a hostile
+  repository make a finding *render* as something other than what its bytes say — the
+  "trojan source" class. This matters most in the code viewer, where finding text sits
+  directly beside the source it purports to describe.
 
 ### 4.6 Platform and supply chain
 
@@ -821,7 +831,7 @@ template is the repository-root `.env.example`.
 | Client generates | `pnpm db:generate` | ✅ generated to `node_modules/@prisma/client` |
 | Everything builds | `pnpm build` | ✅ 14/14 Turbo tasks |
 | Types check | `pnpm typecheck` | ✅ 23/23 Turbo tasks |
-| Tests pass | `pnpm test` | ✅ **123 tests across 7 files** (core 24, scanners 12, testing 6, queue 14, worker 67) |
+| Tests pass | `pnpm test` | ✅ **182 tests across 9 files** (core 34, scanners 13, testing 6, queue 14, worker 67, web 48) |
 | Dev script guards | `pnpm dev:scan-one -- <url>` | ✅ refusal paths verified by **execution**; clone path run end-to-end against `octocat/Hello-World` (0 temp dirs leaked); scan step ⛔ (Semgrep not installed) |
 | Migrations applied | `pnpm --filter @syscanner/db run db:deploy` | ⛔ needs a live Postgres |
 | Sandbox containment | CI workflow | ⛔ needs Docker + a container runtime |

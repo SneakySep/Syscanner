@@ -36,7 +36,7 @@ and must never be reachable *from* it.
 | T6 | Git config abuse | Malicious hooks, submodules, `url.*.insteadOf`, smudge filters | `core.hooksPath=/dev/null`; `--no-recurse-submodules`; `protocol.file.allow=never`; `GIT_LFS_SKIP_SMUDGE=1` |
 | T7 | Archive attacks | Path traversal, symlink escape, zip bomb | Traversal rejection, no out-of-root symlinks, entry/size/ratio caps |
 | T8 | Parser exploitation | XXE in SARIF XML, `billion laughs`, malformed JSON RCE | Parse in trusted orchestrator, XML external entities disabled, schema validation, size caps |
-| T9 | Output injection | Stored XSS via code snippet; queue/DB injection via SARIF fields | Escape all strings; store `snippetHash` not snippets; validate against zod before DB |
+| T9 | Output injection | Stored XSS via code snippet; bidi-spoofed finding text; queue/DB injection via SARIF fields | Escape all strings; store `snippetHash` not snippets; strip bidi overrides; validate against zod before DB |
 | T10 | Denial of wallet | 10k findings/scan, huge repo, unbounded cache growth | Per-tenant quotas + concurrency limits; max repo size/file count/findings |
 | T11 | Scanner config abuse | Repo ships a rule file that pulls remote rules or uploads telemetry | Trusted bundled rulesets only; `--metrics=off`; reject repo-supplied remote configs |
 | T12 | Supply-chain via our images | Compromised `:latest` scanner image | Digest-pinned images verified with cosign/Sigstore; own SBOM per image |

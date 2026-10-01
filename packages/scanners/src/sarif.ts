@@ -1,11 +1,6 @@
 import { createHash } from 'node:crypto';
 
-import {
-  normalizeRepoPath,
-  resolveSeverity,
-  type FindingKindName,
-  type SeverityName,
-} from '@syscanner/core';
+import { normalizeRepoPath, resolveSeverity, stripBidiControls, type FindingKindName, type SeverityName } from '@syscanner/core';
 
 import type { NormalizedFinding, ParseOptions, ParseResult, SarifLevel } from './types';
 
@@ -44,10 +39,16 @@ function asArray(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
 }
 
-/** Trims, strips control characters and hard-caps length. Returns undefined if empty. */
+/**
+ * Trims, strips control characters and hard-caps length. Returns undefined if empty.
+ *
+ * Bidi overrides are removed here as well as C0 controls: a repository can otherwise
+ * make a finding render as something other than what its bytes say, which matters
+ * most in the code viewer where findings sit next to the source they describe.
+ */
 function sanitizeString(value: unknown, maxLength = MAX_STRING_LENGTH): string | undefined {
   if (typeof value !== 'string') return undefined;
-  const cleaned = value.replace(CONTROL_CHARS, '').trim();
+  const cleaned = stripBidiControls(value.replace(CONTROL_CHARS, '')).trim();
   if (cleaned.length === 0) return undefined;
   return cleaned.length > maxLength ? cleaned.slice(0, maxLength) : cleaned;
 }

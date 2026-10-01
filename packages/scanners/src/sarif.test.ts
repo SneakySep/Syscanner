@@ -112,6 +112,23 @@ describe('parseSarif', () => {
     expect(result.findings[0]!.title).toBe('evil[31mtext');
   });
 
+  it('strips bidi overrides that would make a finding read as something else', () => {
+    // Without this, "deploy\u202epayload" renders so a reviewer sees the reverse of
+    // what the bytes say — dangerous in the code viewer, where findings sit beside
+    // the source they describe.
+    const result = parseSarif(
+      sarifDocument([
+        { ruleId: 'r\u202e', level: 'error', message: { text: 'safe\u202eevil\u2066text' } },
+      ]),
+      { scanner: 'semgrep', kind: 'SAST' },
+    );
+
+    const finding = result.findings[0]!;
+    expect(finding.title).toBe('safeeviltext');
+    expect(finding.ruleId).toBe('r');
+    expect(JSON.stringify(finding)).not.toMatch(/[\u202a-\u202e\u2066-\u2069]/);
+  });
+
   it('degrades gracefully on malformed JSON instead of throwing', () => {
     const result = parseSarif('{not json', { scanner: 'semgrep', kind: 'SAST' });
     expect(result.findings).toEqual([]);

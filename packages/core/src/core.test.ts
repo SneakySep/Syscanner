@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { computeFingerprint, computeInputFingerprint, hashSnippet } from './fingerprint';
 import { evaluateQualityGate, isPathExcluded, parseScanPolicy } from './policy';
-import { maskSecret, redactText } from './redaction';
+import { maskSecret, redactText, stripBidiControls } from './redaction';
 import { resolveSeverity, severityFromCvss, tallySeverities } from './severity';
 
 describe('computeFingerprint', () => {
@@ -112,6 +112,38 @@ describe('maskSecret / redactText', () => {
   it('redacts credentials embedded in arbitrary text', () => {
     const line = 'token = "ghp_' + 'a'.repeat(40) + '"';
     expect(redactText(line)).toBe('token = "[REDACTED]"');
+  });
+});
+
+describe('stripBidiControls', () => {
+  // A repository can embed these to make rendered text contradict its bytes — the
+  // "trojan source" class of attack. Invisible to a reviewer, so we remove them at
+  // the parse boundary rather than trusting the UI to cope.
+  it.each([
+    ['\u202e', 'RLO right-to-left override'],
+    ['\u202a', 'LRE left-to-right embedding'],
+    ['\u202c', 'PDF pop directional formatting'],
+    ['\u2066', 'LRI left-to-right isolate'],
+    ['\u2069', 'PDI pop directional isolate'],
+    ['\u200f', 'RLM right-to-left mark'],
+    ['\u061c', 'ALM Arabic letter mark'],
+  ])('removes the bidi control %j (%s)', (control) => {
+    expect(stripBidiControls(`const x = 1;${control}`)).toBe('const x = 1;');
+  });
+
+  it('leaves ordinary text, including non-Latin scripts, untouched', () => {
+    const text = 'const ص = "مرحبا"; // 日本語 ✓ emoji 🎉';
+    expect(stripBidiControls(text)).toBe(text);
+  });
+
+  it('stops a spoofed identifier from reading as its reverse', () => {
+    // "admin" written right-to-left would render as "nimda" to a reviewer.
+    const spoofed = 'if (user === "nimda\u202e")';
+    expect(stripBidiControls(spoofed)).toBe('if (user === "nimda")');
+  });
+
+  it('is also applied by redactText, so logging is protected too', () => {
+    expect(redactText('safe\u202eevil')).toBe('safeevil');
   });
 });
 

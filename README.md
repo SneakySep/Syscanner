@@ -18,7 +18,8 @@ line numbers.
 
 ```
 apps/
-  web/             Next.js 15 dashboard + BFF (SSE progress, findings table)
+  web/             Next.js 15 dashboard + BFF (SSE progress, findings table,
+                   Monaco code viewer with vulnerability line highlighting)
   api/             Fastify API gateway: authz, quotas, scan scheduling
   worker/          BullMQ consumers, git fetch, sandbox orchestration, SARIF ingest
                    src/dev/scanOneRepo.ts — UNSAFE local debugging script (dev only)
@@ -68,7 +69,7 @@ pnpm dev                            # web :3000, api :4000, worker
 ```bash
 pnpm build       # turbo: build every package and app        (14 tasks)
 pnpm typecheck   # turbo: tsc --noEmit across the workspace   (23 tasks)
-pnpm test        # turbo: vitest                              (123 tests, 7 files)
+pnpm test        # turbo: vitest                              (182 tests, 9 files)
 pnpm db:validate # prisma validate — no database required
 ```
 
@@ -120,6 +121,7 @@ never executed: we fetch an archive and parse lockfiles, so no `postinstall` hoo
 |---|---|
 | Sandbox execution | Not runnable here — **Docker is not installed on this machine**, so `infra:up` and real scans are unverified. The compose file, seccomp profile and provider code are authored and unit-verified only. |
 | `pnpm dev:scan-one` | The unsafe dev fallback. Its guards are verified **by execution**: production refusal, acknowledgement gate, URL validation (a `file://` URL is refused), and temp-directory cleanup. The clone path was exercised end-to-end against `octocat/Hello-World` (0 temp dirs leaked). **Semgrep is not installed locally**, so the scan step itself is unverified. |
+| Code viewer (`/scans/[scanId]/code`) | Renders a **fixture**, not real data: the schema stores a `snippetHash` rather than the snippet, and there is no source-contents endpoint yet. The page shell, fixture plumbing and lazy Monaco chunk are verified (route returns 200); **Monaco's rendering, decorations and click-to-scroll are not** — they are client-side and need a browser. "Suggested Fix" is hand-authored in the fixture because `Finding` has no remediation column. |
 | Scanner binaries | Semgrep/Gitleaks/osv-scanner/Trivy are **not installed locally**. Adapters and the SARIF parser are fully tested; live tool invocation is untested. |
 | Migrations | The schema validates and the client generates, but no `migration.sql` has been authored (that needs a live Postgres via `prisma migrate dev`). |
 | Authentication | NextAuth is not wired up. The API trusts an `x-organization-id` header set by the API gateway, and the web app calls the API server-side only (`lib/api.ts` is the auth seam). |
