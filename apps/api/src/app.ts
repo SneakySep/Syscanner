@@ -9,6 +9,7 @@ import prismaPlugin from './plugins/prisma';
 import queuePlugin from './plugins/queues';
 import { registerFindingRoutes } from './routes/findings';
 import { registerHealthRoutes } from './routes/health';
+import { registerRepositoryRoutes } from './routes/repositories';
 import { registerScanRoutes } from './routes/scans';
 import { TenantResolutionError } from './tenant';
 
@@ -97,6 +98,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   );
 
   await registerHealthRoutes(app);
+  await registerRepositoryRoutes(app);
   await registerScanRoutes(app);
   await registerFindingRoutes(app);
 

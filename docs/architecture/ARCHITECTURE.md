@@ -231,6 +231,40 @@ sequenceDiagram
 | `PATCH` | `/v1/findings/:id` | Transition status (IGNORED / FALSE_POSITIVE / …) |
 | `POST` | `/v1/webhooks/github` | HMAC-verified push/PR ingress |
 
+### 1.6 Scratch directory lifecycle
+
+Every scan gets a directory under `WORKER_SCRATCH_DIR` containing the read-only
+checkout (`src/`) and the sandbox's only writable mount (`out/`). Its lifetime is the
+easiest thing in this design to get wrong — and it *was* wrong in the first cut of
+this codebase, where the only `rm` call ran at the **start** of a scan and nothing
+ever deleted the tree afterwards. Directories accumulated until the disk filled, and
+a comment claimed a `finally` block did the cleanup when none existed.
+
+Ownership is now explicit:
+
+| Phase | Owner | Behaviour |
+|---|---|---|
+| Start of a scan | `orchestrateScanJob` | `prepareScanScratch` wipes any leftover, then creates `src/` and `out/` |
+| While scanning | The `ScanTask` jobs | The tree **must** survive: each scanner reads `src/` and writes `out/` |
+| Terminal (COMPLETED / PARTIAL) | `finalizeScan` | `cleanupScanScratch` once every task has settled |
+| Fetch failure | `orchestrateScanJob`'s `catch` | Releases immediately; the tree is unusable |
+| Worker killed mid-scan | The reaper interval | `sweepStaleScratch` removes trees older than 2× the sandbox timeout |
+| `scan_repository` jobs | `scanRepositoryJob` | A literal `try…finally` — one process owns the whole lifecycle |
+
+That last row is the important distinction: a `finally` in `orchestrateScanJob` would
+delete the source tree while the scanner jobs it had just enqueued still needed it.
+`scanRepositoryJob` does not fan out, so it *can* and *does* clean up inline.
+
+Two properties make this safe:
+
+- **`cleanupScanScratch` never throws.** It logs and returns `false`; a cleanup
+  failure must not fail an otherwise-complete scan. `rm` uses `maxRetries: 3` because
+  Windows holds file handles inside `.git`.
+- **Scan ids are validated against `^[A-Za-z0-9_-]{1,64}$` before becoming a path
+  segment.** Without that check, an id containing `../` would turn the cleanup
+  `rm -rf` into an arbitrary-directory delete. The same constraint is enforced on
+  `scanRepositoryJobSchema.jobId` at the queue boundary.
+
 ---
 
 ## 2. Monorepo directory structure (Turborepo)
@@ -271,15 +305,20 @@ Syscanner/
 │  │  ├─ Dockerfile
 │  │  └─ package.json
 │  │
-│  ├─ worker/                         # BullMQ consumers (orchestrator + parsers)
+│  ├─ worker/                         # BullMQ consumers (orchestrator + scanners)
 │  │  ├─ src/
-│  │  │  ├─ index.ts                  # worker bootstrap, concurrency, metrics
-│  │  │  ├─ processors/               # orchestrateScan, runSast, runSecrets,
-│  │  │  │                            # runDependencies, aggregateReport
+│  │  │  ├─ index.ts                  # bootstrap, queue routing, finalize, reaper
+│  │  │  ├─ config.ts                 # validated env, incl. every sandbox limit
+│  │  │  ├─ scratch.ts                # per-scan scratch directory lifecycle
+│  │  │  ├─ ingest.ts                 # fingerprints -> Finding rows + aggregates
+│  │  │  ├─ processors/
+│  │  │  │  ├─ orchestrateScan.ts     # fetch + fan out   (scan:orchestrate)
+│  │  │  │  ├─ scanRepository.ts      # self-contained URL scan (scan:repository)
+│  │  │  │  ├─ runScanner.ts          # one tool for an existing scan
+│  │  │  │  └─ executeSandboxedTool.ts # shared: run sandbox -> parse report
 │  │  │  ├─ sandbox/                  # provider abstraction (docker | gvisor | kata)
-│  │  │  ├─ git/fetchByCommit.ts      # hook-free, submodule-free, size-capped
-│  │  │  ├─ parse/sarif.ts            # hardened SARIF -> Finding mapper
-│  │  │  └─ telemetry.ts
+│  │  │  ├─ git/                      # fetchByCommit, validateCloneUrl
+│  │  │  └─ dev/scanOneRepo.ts        # UNSAFE dev-only local scanner
 │  │  ├─ Dockerfile
 │  │  └─ package.json
 │  │
@@ -781,8 +820,9 @@ template is the repository-root `.env.example`.
 | Schema valid | `pnpm db:validate` | ✅ schema is valid (Prisma 6.19.3) |
 | Client generates | `pnpm db:generate` | ✅ generated to `node_modules/@prisma/client` |
 | Everything builds | `pnpm build` | ✅ 14/14 Turbo tasks |
-| Types check | `pnpm typecheck` | ✅ |
-| Tests pass | `pnpm test` | ✅ 42 tests (core 24, scanners 12, testing 6) |
+| Types check | `pnpm typecheck` | ✅ 23/23 Turbo tasks |
+| Tests pass | `pnpm test` | ✅ **123 tests across 7 files** (core 24, scanners 12, testing 6, queue 14, worker 67) |
+| Dev script guards | `pnpm dev:scan-one -- <url>` | ✅ refusal paths verified by **execution**; clone path run end-to-end against `octocat/Hello-World` (0 temp dirs leaked); scan step ⛔ (Semgrep not installed) |
 | Migrations applied | `pnpm --filter @syscanner/db run db:deploy` | ⛔ needs a live Postgres |
 | Sandbox containment | CI workflow | ⛔ needs Docker + a container runtime |
 

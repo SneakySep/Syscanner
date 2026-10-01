@@ -1,11 +1,10 @@
-import { mkdir, rm } from 'node:fs/promises';
-
 import { parseScanPolicy } from '@syscanner/core';
 import { prisma } from '@syscanner/db';
 import type { OrchestrateScanJob } from '@syscanner/queue';
 
 import { loadWorkerConfig, type WorkerConfig } from '../config';
 import { fetchByCommit } from '../git/fetchByCommit';
+import { cleanupScanScratch, prepareScanScratch } from '../scratch';
 import type { ScanQueueProducer } from '@syscanner/queue';
 
 /**
@@ -45,25 +44,20 @@ export async function orchestrateScanJob(
     return;
   }
 
-  const scanRoot = `${config.WORKER_SCRATCH_DIR}/${scan.id}`;
-  const sourceDir = `${scanRoot}/src`;
-  const outputDir = `${scanRoot}/out`;
-
   await prisma.scan.update({
     where: { id: scan.id },
     data: { status: 'CLONING', startedAt: new Date() },
   });
 
   try {
-    // Ephemeral, per-scan scratch. Wiped in `finally` regardless of outcome.
-    await rm(scanRoot, { recursive: true, force: true });
-    await mkdir(sourceDir, { recursive: true });
-    await mkdir(outputDir, { recursive: true });
+    // A fresh, empty tree. `prepareScanScratch` wipes any leftover from a previous
+    // attempt, so a retry never inherits a half-fetched checkout.
+    const scratch = await prepareScanScratch(config, scan.id);
 
     await fetchByCommit({
       cloneUrl: scan.repository.cloneUrl,
       commitSha: scan.commitSha,
-      destination: sourceDir,
+      destination: scratch.sourceDir,
       maxBytes: config.SANDBOX_MAX_REPO_MB * 1024 * 1024,
       timeoutMs: config.SANDBOX_CLONE_TIMEOUT_MS,
       // Resolved from Vault/KMS at job time by the caller in production; never
@@ -89,10 +83,14 @@ export async function orchestrateScanJob(
         kind,
         tool,
         commitSha: scan.commitSha,
-        sourceKey: sourceDir,
+        sourceKey: scratch.sourceDir,
         policyVersion: scan.policyVersion,
       });
     }
+
+    // The scratch tree is deliberately NOT removed here: the scanner jobs
+    // enqueued above still need to read it. Ownership passes to `finalizeScan`,
+    // which runs once every ScanTask has settled. See apps/worker/src/index.ts.
   } catch (error) {
     await prisma.scan.update({
       where: { id: scan.id },
@@ -103,6 +101,10 @@ export async function orchestrateScanJob(
         errorMessage: error instanceof Error ? error.message : 'Unknown fetch failure',
       },
     });
+
+    // The tree is unusable now, so release the disk immediately rather than
+    // waiting for the stale-directory sweeper.
+    await cleanupScanScratch(config, scan.id);
     throw error;
   }
 }

@@ -9,14 +9,17 @@ import {
   parseJobPayload,
   QUEUE_NAMES,
   ScanQueueProducer,
+  scanRepositoryJobSchema,
   scannerJobSchema,
   type NotifyJob,
 } from '@syscanner/queue';
 
-import { loadWorkerConfig } from './config';
+import { loadWorkerConfig, type WorkerConfig } from './config';
 import { orchestrateScanJob } from './processors/orchestrateScan';
 import { runScannerJob } from './processors/runScanner';
+import { scanRepositoryJob } from './processors/scanRepository';
 import { DockerSandboxProvider } from './sandbox/dockerProvider';
+import { cleanupScanScratch, sweepStaleScratch } from './scratch';
 
 /**
  * Worker process entrypoint.
@@ -36,7 +39,7 @@ async function main(): Promise<void> {
     (queueName) =>
       new Worker(
         queueName,
-        async (job: Job) => handleJob(queueName, job, producer),
+        async (job: Job) => handleJob(queueName, job, producer, config),
         {
           connection,
           prefix: 'syscanner',
@@ -60,8 +63,9 @@ async function main(): Promise<void> {
     });
   }
 
-  // Orphan reaper: a worker killed mid-scan leaves a container behind, which would
-  // keep consuming the host's resources. Sweep them on a timer.
+  // Orphan reaper. A worker killed mid-scan leaves two things behind: a container
+  // that keeps consuming host resources, and a scratch directory that never gets
+  // cleaned up. Both are swept here, on the same timer.
   const reaper = new DockerSandboxProvider();
   const reapInterval = setInterval(
     () => {
@@ -71,6 +75,12 @@ async function main(): Promise<void> {
           if (count > 0) logger.warn({ count }, 'reaped orphaned sandboxes');
         })
         .catch((error: unknown) => logger.error({ err: error }, 'sandbox reap failed'));
+
+      void sweepStaleScratch(config, config.SANDBOX_TOOL_TIMEOUT_MS * 2)
+        .then((count) => {
+          if (count > 0) logger.warn({ count }, 'swept stale scan scratch directories');
+        })
+        .catch((error: unknown) => logger.error({ err: error }, 'scratch sweep failed'));
     },
     Math.max(config.SANDBOX_TOOL_TIMEOUT_MS, 60_000),
   );
@@ -102,13 +112,29 @@ async function handleJob(
   queueName: string,
   job: Job,
   producer: ScanQueueProducer,
+  config: WorkerConfig,
 ): Promise<void> {
   const log = logger.child({ queue: queueName, jobId: job.id });
 
   switch (queueName) {
     case QUEUE_NAMES.orchestrate: {
       const payload = parseJobPayload(orchestrateScanJobSchema, job.data, queueName);
-      await orchestrateScanJob(payload, producer);
+      await orchestrateScanJob(payload, producer, config);
+      return;
+    }
+    case QUEUE_NAMES.repository: {
+      const payload = parseJobPayload(scanRepositoryJobSchema, job.data, queueName);
+      const result = await scanRepositoryJob(payload);
+      log.info(
+        {
+          jobId: result.jobId,
+          commitSha: result.commitSha,
+          findings: result.findings,
+          truncated: result.truncated,
+          persisted: result.persisted,
+        },
+        'repository scan complete',
+      );
       return;
     }
     case QUEUE_NAMES.sast:
@@ -119,7 +145,7 @@ async function handleJob(
       return;
     }
     case QUEUE_NAMES.report: {
-      await finalizeScan(job.data?.scanId as string | undefined, log);
+      await finalizeScan(job.data?.scanId as string | undefined, log, config);
       return;
     }
     case QUEUE_NAMES.notify: {
@@ -133,15 +159,21 @@ async function handleJob(
 }
 
 /**
- * Marks a scan terminal once every scanner task has settled.
+ * Marks a scan terminal once every scanner task has settled, then releases the
+ * scratch tree.
  *
  * `PARTIAL` is a first-class outcome: one tool failing must not invalidate the
  * findings the others produced, but the customer must be told the result is
  * incomplete rather than presented as clean.
+ *
+ * This is the correct teardown point. A `finally` inside the orchestrator would
+ * delete the source tree while the scanner jobs it just enqueued still need to
+ * read it, so ownership of the scratch directory passes here instead.
  */
 async function finalizeScan(
   scanId: string | undefined,
   log: { info: (obj: object, msg: string) => void },
+  config: WorkerConfig,
 ): Promise<void> {
   if (!scanId) return;
 
@@ -170,7 +202,12 @@ async function finalizeScan(
     },
   });
 
-  log.info({ scanId, failedTasks: failed.length }, 'scan finalized');
+  // Every consumer has finished, so the checkout is no longer needed. This runs
+  // for both terminal paths (COMPLETED and PARTIAL); a FAILED scan is released by
+  // the orchestrator's catch block instead.
+  const released = await cleanupScanScratch(config, scanId);
+
+  log.info({ scanId, failedTasks: failed.length, scratchReleased: released }, 'scan finalized');
 }
 
 if (require.main === module) {

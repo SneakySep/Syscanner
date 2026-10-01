@@ -13,6 +13,7 @@ import type {
   AggregateReportJobInput,
   NotifyJobInput,
   OrchestrateScanJobInput,
+  ScanRepositoryJobInput,
   ScannerJobInput,
 } from './jobs';
 
@@ -41,6 +42,20 @@ export class ScanQueueProducer {
       jobId: `orchestrate:${job.scanId}`,
     } as JobsOptions);
     return added.id ?? job.scanId;
+  }
+
+  /**
+   * Enqueues a self-contained repository scan.
+   *
+   * `jobId` doubles as the BullMQ job id, so resubmitting the same scan is a no-op
+   * rather than a duplicate run.
+   */
+  async enqueueRepositoryScan(job: ScanRepositoryJobInput): Promise<string> {
+    const added = await this.queue(QUEUE_NAMES.repository).add('scan_repository', job, {
+      ...SCANNER_JOB_OPTIONS,
+      jobId: `scan_repository:${job.jobId}`,
+    } as JobsOptions);
+    return added.id ?? job.jobId;
   }
 
   async enqueueScanner(job: ScannerJobInput): Promise<string> {

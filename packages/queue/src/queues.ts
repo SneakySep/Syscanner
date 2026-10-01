@@ -8,6 +8,12 @@
 export const QUEUE_NAMES = {
   /** API -> orchestrator: "plan and run this scan". */
   orchestrate: 'scan:orchestrate',
+  /**
+   * A self-contained "scan this repository URL" job. Unlike `orchestrate`, it
+   * carries everything it needs and does not require a pre-existing `Scan` row,
+   * so it can be driven from a CLI, a webhook or an external integration.
+   */
+  repository: 'scan:repository',
   /** Orchestrator -> SAST sandbox. */
   sast: 'scan:sast',
   /** Orchestrator -> secrets-detection sandbox. */
@@ -27,6 +33,7 @@ export type QueueName = (typeof QUEUE_NAMES)[keyof typeof QUEUE_NAMES];
 /** Queues that a worker process consumes. */
 export const CONSUMER_QUEUES: readonly QueueName[] = [
   QUEUE_NAMES.orchestrate,
+  QUEUE_NAMES.repository,
   QUEUE_NAMES.sast,
   QUEUE_NAMES.secrets,
   QUEUE_NAMES.dependencies,

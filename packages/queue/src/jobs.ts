@@ -54,6 +54,42 @@ export const scannerJobSchema = z.object({
 export type ScannerJob = z.infer<typeof scannerJobSchema>;
 export type ScannerJobInput = z.input<typeof scannerJobSchema>;
 
+/**
+ * A self-contained "scan this repository URL" job.
+ *
+ * `orchestrateScanJob` references a `Scan` row the API already created; this job
+ * instead carries its own inputs, so it can be submitted from a CLI, a webhook or
+ * an external integration without a prior database write.
+ */
+export const scanRepositoryJobSchema = z.object({
+  /**
+   * Caller-supplied correlation id, also used as the BullMQ job id.
+   *
+   * The character class is narrow on purpose: this value becomes a directory name
+   * under the worker's scratch root, so permitting `:` or a path separator here
+   * would hand an attacker control of the cleanup path.
+   */
+  jobId: z
+    .string()
+    .regex(/^[A-Za-z0-9_-]{1,64}$/, 'jobId must be 1-64 characters of [A-Za-z0-9_-]'),
+  /** Validated again by `assertSafeCloneUrl` before it reaches git. */
+  repositoryUrl: z.string().min(1).max(2_048),
+  /** Exact commit to scan. A branch name is refused: a moving tip is not reproducible. */
+  commitSha: commitShaSchema,
+  /** Human-readable ref, recorded for display only. */
+  ref: z.string().max(256).optional(),
+  /** Present when the job is attached to an existing tenant and repository. */
+  organizationId: z.string().min(1).max(64).optional(),
+  repositoryId: z.string().min(1).max(64).optional(),
+  /**
+   * Ruleset location. Defaults to the image-bundled trusted path. A remote URL is
+   * never accepted — see ARCHITECTURE.md §4.3.
+   */
+  semgrepConfigPath: z.string().max(512).optional(),
+});
+export type ScanRepositoryJob = z.infer<typeof scanRepositoryJobSchema>;
+export type ScanRepositoryJobInput = z.input<typeof scanRepositoryJobSchema>;
+
 export const aggregateReportJobSchema = z.object({
   ...ids,
   commitSha: commitShaSchema,

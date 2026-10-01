@@ -69,7 +69,7 @@ export async function ingestFindings(
             taskId: context.taskId ?? null,
             repositoryId: context.repositoryId,
             organizationId: context.organizationId,
-            ...toRow(finding),
+            ...toDatabasePayload(finding),
           },
         }),
       ),
@@ -97,16 +97,20 @@ export function fingerprintFor(finding: NormalizedFinding): string {
 }
 
 /**
- * Columns this mapper owns. The foreign keys and the fingerprint are set by
- * `ingestFindings`, so they are excluded here — otherwise spreading this object
- * after the explicit fields would silently overwrite them.
+ * Columns this mapper owns.
+ *
+ * The foreign keys and the fingerprint are set by `ingestFindings`, so they are
+ * excluded here — otherwise spreading this object after the explicit fields would
+ * silently overwrite them. Exported because the "format findings into a structured
+ * database payload" step is worth testing and reusing on its own.
  */
-type FindingRow = Omit<
+export type FindingRow = Omit<
   Prisma.FindingUncheckedCreateInput,
   'id' | 'fingerprint' | 'scanId' | 'taskId' | 'repositoryId' | 'organizationId'
 >;
 
-function toRow(finding: NormalizedFinding): FindingRow {
+/** Maps one normalized finding onto the columns of a `Finding` row. */
+export function toDatabasePayload(finding: NormalizedFinding): FindingRow {
   return {
     // `kind` is guaranteed to be one of the ScannerKind enum members by the
     // adapters, which only ever emit values from that union.
